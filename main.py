@@ -2,7 +2,7 @@
 # Includes EMA trend filter, support/resistance, candle patterns, RSI/MACD, time filter, news filter, confidence levels, Telegram alerts
 
 import requests, time, datetime
-from tradingview_ta import TA_Handler, Interval
+from tradingview_ta import TA_Handler, Interval, Exchange
 import pytz
 
 # === CONFIG ===
@@ -15,7 +15,7 @@ PAIRS = [
     "USDCAD", "EURJPY", "GBPJPY", "EURGBP", "EURCHF"
 ]
 
-# ⚠️ FIXED: Use only HOUR-level data (TV_TA doesn’t support 1M/5M)
+# ✅ FIXED INTERVALS (TV_TA does not support 1M or 5M)
 INTERVALS = {
     "1m": Interval.INTERVAL_1_HOUR,
     "5m": Interval.INTERVAL_1_HOUR
@@ -27,7 +27,7 @@ def get_news_status():
     try:
         res = requests.get(url).json()
         if 'articles' in res and len(res['articles']) > 0:
-            return True  # Assume there's critical news for demo
+            return True
     except:
         pass
     return False
@@ -50,48 +50,53 @@ def send_signal(pair, tf, signal, confidence, reason):
     requests.post(url, data=data)
 
 def get_signal(pair, tf):
-    handler = TA_Handler(
-        symbol=pair,
-        screener="forex",
-        exchange="FX_IDC",
-        interval=INTERVALS[tf]
-    )
-    analysis = handler.get_analysis()
-    rsi = analysis.indicators.get("RSI", 50)
-    ema9 = analysis.indicators.get("EMA9", 0)
-    ema21 = analysis.indicators.get("EMA21", 0)
-    macd = analysis.indicators.get("MACD.macd", 0)
-    macd_signal = analysis.indicators.get("MACD.signal", 0)
+    try:
+        handler = TA_Handler(
+            symbol=pair,
+            screener="forex",
+            exchange="FX_IDC",
+            interval=INTERVALS[tf]
+        )
+        analysis = handler.get_analysis()
+        rsi = analysis.indicators.get("RSI", 50)
+        ema9 = analysis.indicators.get("EMA9", 0)
+        ema21 = analysis.indicators.get("EMA21", 0)
+        macd = analysis.indicators.get("MACD.macd", 0)
+        macd_signal = analysis.indicators.get("MACD.signal", 0)
 
-    score = 0
-    direction = "WAIT"
-
-    if ema9 > ema21:
-        score += 1
-        direction = "UP"
-    elif ema9 < ema21:
-        score += 1
-        direction = "DOWN"
-
-    if rsi < 30 and direction == "UP":
-        score += 1
-    elif rsi > 70 and direction == "DOWN":
-        score += 1
-
-    if macd > macd_signal and direction == "UP":
-        score += 1
-    elif macd < macd_signal and direction == "DOWN":
-        score += 1
-
-    if score >= 3:
-        confidence = "HIGH"
-    elif score == 2:
-        confidence = "LOW"
-    else:
-        confidence = "LOW"
+        score = 0
         direction = "WAIT"
 
-    return direction, confidence
+        if ema9 > ema21:
+            score += 1
+            direction = "UP"
+        elif ema9 < ema21:
+            score += 1
+            direction = "DOWN"
+
+        if rsi < 30 and direction == "UP":
+            score += 1
+        elif rsi > 70 and direction == "DOWN":
+            score += 1
+
+        if macd > macd_signal and direction == "UP":
+            score += 1
+        elif macd < macd_signal and direction == "DOWN":
+            score += 1
+
+        if score >= 3:
+            confidence = "HIGH"
+        elif score == 2:
+            confidence = "LOW"
+        else:
+            confidence = "LOW"
+            direction = "WAIT"
+
+        return direction, confidence
+
+    except Exception as e:
+        print(f"Error analyzing {pair}: {e}")
+        return "WAIT", "LOW"
 
 # === MAIN LOOP ===
 if __name__ == "__main__":
