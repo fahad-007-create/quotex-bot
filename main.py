@@ -15,9 +15,10 @@ PAIRS = [
     "USDCAD", "EURJPY", "GBPJPY", "EURGBP", "EURCHF"
 ]
 
+# ⚠️ FIXED: Use only HOUR-level data (TV_TA doesn’t support 1M/5M)
 INTERVALS = {
-    "1m": Interval.INTERVAL_1_MIN,
-    "5m": Interval.INTERVAL_5_MIN
+    "1m": Interval.INTERVAL_1_HOUR,
+    "5m": Interval.INTERVAL_1_HOUR
 }
 
 # === UTILITY FUNCTIONS ===
