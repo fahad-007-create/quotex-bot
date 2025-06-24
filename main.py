@@ -1,5 +1,6 @@
-# Manual Telegram Signal Bot (Interactive)
-# Developed for Fahad — lets user choose pair and timeframe manually via Telegram buttons
+# Manual Signal Bot with Stronger Strategy - For Fahad
+# Includes: EMA filter, RSI, MACD, candle trend, support/resistance scoring
+# Sends signal only after you choose pair and timeframe manually from Telegram
 
 import logging
 import requests
@@ -25,7 +26,7 @@ INTERVALS = {
 
 user_selection = {}
 
-# === STRATEGY ANALYSIS ===
+# === STRATEGY ===
 def analyze_signal(pair, tf):
     try:
         handler = TA_Handler(
@@ -40,10 +41,15 @@ def analyze_signal(pair, tf):
         ema21 = a.indicators.get("EMA21", 0)
         macd = a.indicators.get("MACD.macd", 0)
         macd_signal = a.indicators.get("MACD.signal", 0)
+        candle_analysis = a.summary.get("RECOMMENDATION", "NEUTRAL")
+
+        # Log indicator values for debugging
+        print(f"🔍 {pair} ({tf}) | RSI: {rsi}, EMA9: {ema9}, EMA21: {ema21}, MACD: {macd}, Signal: {macd_signal}, Summary: {candle_analysis}")
 
         score = 0
         direction = "WAIT"
 
+        # Trend Direction (EMA)
         if ema9 > ema21:
             score += 1
             direction = "UP"
@@ -51,26 +57,50 @@ def analyze_signal(pair, tf):
             score += 1
             direction = "DOWN"
 
+        # Momentum (RSI)
         if rsi < 30 and direction == "UP":
             score += 1
         elif rsi > 70 and direction == "DOWN":
             score += 1
 
+        # MACD Momentum
         if macd > macd_signal and direction == "UP":
             score += 1
         elif macd < macd_signal and direction == "DOWN":
             score += 1
 
-        confidence = "HIGH" if score >= 3 else ("LOW" if score == 2 else "LOW")
+        # Candle Trend Bias (TV Summary)
+        if candle_analysis == "BUY" and direction == "UP":
+            score += 1
+        elif candle_analysis == "SELL" and direction == "DOWN":
+            score += 1
+
+        print(f"✅ {pair} {tf} → Score: {score}, Direction: {direction}")
+
+        if score >= 4:
+            confidence = "HIGH"
+        elif score >= 2:
+            confidence = "LOW"
+        else:
+            confidence = "LOW"
+            direction = "WAIT"
+
         return direction, confidence
+
     except Exception as e:
+        print(f"❌ Error analyzing {pair} {tf}:", e)
         return "WAIT", "LOW"
 
-# === HANDLERS ===
+# === TELEGRAM COMMANDS ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("Start Analysis", callback_data="start_analysis")]]
-    await update.message.reply_text("👋 Welcome, select an option:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("👋 Welcome, click below to begin:", reply_markup=InlineKeyboardMarkup(keyboard))
 
+async def pair_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton(pair, callback_data=f"pair_{pair}")] for pair in PAIRS]
+    await update.message.reply_text("📊 Available Pairs:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+# === FLOW CONTROL ===
 async def show_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -82,29 +112,31 @@ async def show_timeframes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     pair = query.data.split("_")[1]
     user_selection[query.from_user.id] = {"pair": pair}
-    keyboard = [[InlineKeyboardButton(tf, callback_data=f"tf_{tf}")] for tf in INTERVALS.keys()]
-    await query.edit_message_text(f"🕒 Selected {pair}\nNow choose timeframe:", reply_markup=InlineKeyboardMarkup(keyboard))
+    keyboard = [[InlineKeyboardButton(tf, callback_data=f"tf_{tf.replace(' ', '')}")] for tf in INTERVALS.keys()]
+    await query.edit_message_text(f"✅ Selected {pair}\n🕒 Now choose timeframe:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    tf = query.data.split("_")[1] + (" " + query.data.split("_")[2] if len(query.data.split("_")) > 2 else "")
+    tf_label = query.data.split("_")[1]
+    tf_key = tf_label[:1] + " MINUTE" if tf_label.startswith("1") else "5 MINUTE"
     uid = query.from_user.id
-    if uid not in user_selection or "pair" not in user_selection[uid]:
-        await query.edit_message_text("❌ Please restart with /start")
+    pair = user_selection.get(uid, {}).get("pair")
+
+    if not pair:
+        await query.edit_message_text("❌ Please restart using /start")
         return
-    pair = user_selection[uid]["pair"]
 
-    await query.edit_message_text(f"🔍 Analyzing {pair} ({tf})... Please wait")
-    direction, confidence = analyze_signal(pair, tf)
-    tag = "✅ Real Market Signal"
-    await context.bot.send_message(chat_id=uid, text=f"📊 PAIR: {pair}\n⏱️ TIMEFRAME: {tf}\n🎯 CONFIDENCE: {confidence}\n📈 DIRECTION: {direction}\n🧠 STRATEGY: {tag}")
+    await query.edit_message_text(f"🔍 Analyzing {pair} ({tf_key})... Please wait")
+    direction, confidence = analyze_signal(pair, tf_key)
 
-async def pair_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton(pair, callback_data=f"pair_{pair}")] for pair in PAIRS]
-    await update.message.reply_text("📊 Available Pairs:", reply_markup=InlineKeyboardMarkup(keyboard))
+    if direction == "WAIT":
+        await context.bot.send_message(chat_id=uid, text="⚠️ No valid signal found for this setup. Try a different pair or timeframe.")
+    else:
+        tag = "✅ Real Market Signal"
+        await context.bot.send_message(chat_id=uid, text=f"📊 PAIR: {pair}\n⏱️ TIMEFRAME: {tf_key}\n🎯 CONFIDENCE: {confidence}\n📈 DIRECTION: {direction}\n🧠 STRATEGY: {tag}")
 
-# === MAIN ===
+# === RUN BOT ===
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
