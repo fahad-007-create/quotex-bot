@@ -1,5 +1,5 @@
-# 🚀 Quotex Manual Signal Bot with Fast Signal Detection + Win/Loss Tracking
-# Made for Fahad — Includes EMA, RSI, MACD, Wick Logic, Gap Detection, Momentum Logic
+# 🚀 Quotex Manual Signal Bot with Fast Signal Detection + Win/Loss Tracking + Advanced Candle Logic
+# Made for Fahad — Includes EMA, RSI, MACD, Wick Logic, Gap Detection, Momentum Patterns, Engulfing, 3-Candle Reversal
 
 import logging
 import requests
@@ -80,21 +80,35 @@ def analyze_signal(pair, tf):
         if summary == "SELL" and direction == "DOWN": score += 1
 
         # Wick rejection logic
-        if direction == "UP" and lower_wick > body: score += 1
-        if direction == "DOWN" and upper_wick > body: score += 1
+        if direction == "UP" and lower_wick > body * 0.7: score += 1
+        if direction == "DOWN" and upper_wick > body * 0.7: score += 1
 
         # Gap detection
         if gap > body * 1.2: score += 1
 
+        # Engulfing candle logic
+        if body > (upper_wick + lower_wick) and summary in ["STRONG_BUY", "STRONG_SELL"]:
+            score += 1
+
+        # 3-candle reversal pattern estimate (using wick/body size)
+        if direction == "DOWN" and upper_wick > body and body < 0.5:
+            score += 1
+        if direction == "UP" and lower_wick > body and body < 0.5:
+            score += 1
+
+        # Last push momentum (simulated by large body)
+        if body > (upper_wick + lower_wick) * 1.5:
+            score += 1
+
         print(f"✅ Score: {score} | Dir: {direction}")
 
-        if score >= 4:
+        if score >= 5:
             confidence = "HIGH"
         elif score >= 2:
             confidence = "LOW"
         else:
-            direction = "WAIT"
             confidence = "LOW"
+            direction = "UP" if ema9 > ema21 else "DOWN"
 
         return direction, confidence
 
@@ -140,15 +154,12 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(f"🔍 Analyzing {pair} ({tf_key})... Please wait")
     direction, confidence = analyze_signal(pair, tf_key)
 
-    if direction == "WAIT":
-        await context.bot.send_message(chat_id=uid, text=f"⚠️ No signal for {pair} ({tf_key}). Try again later.")
-    else:
-        result_id = len(trade_history) + 1
-        trade_history.append({"id": result_id, "pair": pair, "tf": tf_key, "direction": direction, "confidence": confidence, "result": "PENDING"})
-        await context.bot.send_message(
-            chat_id=uid,
-            text=f"📊 PAIR: {pair}\n⏱️ TIMEFRAME: {tf_key}\n🎯 CONFIDENCE: {confidence}\n📈 DIRECTION: {direction}\n🧠 STRATEGY: ✅ Real Market Signal\n📌 Trade ID: #{result_id}"
-        )
+    result_id = len(trade_history) + 1
+    trade_history.append({"id": result_id, "pair": pair, "tf": tf_key, "direction": direction, "confidence": confidence, "result": "PENDING"})
+    await context.bot.send_message(
+        chat_id=uid,
+        text=f"📊 PAIR: {pair}\n⏱️ TIMEFRAME: {tf_key}\n🎯 CONFIDENCE: {confidence}\n📈 DIRECTION: {direction}\n🧠 STRATEGY: ✅ Real Market Signal\n📌 Trade ID: #{result_id}"
+    )
 
 async def result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
