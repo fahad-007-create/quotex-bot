@@ -1,4 +1,5 @@
-# ✅ Quotex Sniper Bot - Final Version with 100 Candle Analysis + Win/Loss Fix
+
+# ✅ Quotex Sniper Bot - Fully Fixed with Candle Color Win Detection + Live Stats Display
 
 import logging
 import requests
@@ -20,7 +21,7 @@ PAIRS = [
 user_selection = {}
 trade_history = []
 
-# === Utility Functions ===
+# === Utilities ===
 def get_current_time():
     return datetime.datetime.now(pytz.timezone("Asia/Karachi"))
 
@@ -38,7 +39,7 @@ def is_red_news():
     except: pass
     return False
 
-def get_recent_candles(pair, count=100):
+def get_recent_candles(pair, count=1):
     url = f"https://api.taapi.io/candles?secret=demo&exchange=fx_idc&symbol={pair}&interval=1m&limit={count}"
     try:
         data = requests.get(url).json()
@@ -51,7 +52,7 @@ def detect_snr_from_history(candles):
     lows = [c["low"] for c in candles]
     return max(highs[-20:]), min(lows[-20:])
 
-# === Strategy Analysis ===
+# === Analyzer ===
 def analyze(pair):
     try:
         handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
@@ -83,12 +84,11 @@ def analyze(pair):
         if direction == "DOWN" and upper_wick > body: score += 1; reasons.append("Wick Reject")
         if body > upper_wick + lower_wick: score += 1; reasons.append("Strong Body")
 
-        # 📊 SNR from last 100 candles
-        candles = get_recent_candles(pair.replace("/", ""))
+        candles = get_recent_candles(pair.replace("/", ""), 100)
         if candles:
             res, sup = detect_snr_from_history(candles)
-            if direction == "UP" and close > sup: score += 1; reasons.append("Support Confirmed")
-            if direction == "DOWN" and close < res: score += 1; reasons.append("Resistance Confirmed")
+            if direction == "UP" and close > sup: score += 1; reasons.append("Support Zone")
+            if direction == "DOWN" and close < res: score += 1; reasons.append("Resistance Zone")
 
         if score >= 5: confidence = "HIGH"
         elif score >= 3: confidence = "MEDIUM"
@@ -96,46 +96,63 @@ def analyze(pair):
     except:
         return "UP", "LOW", "red", ["Fallback"]
 
-# === Telegram Bot Logic ===
+# === Telegram Bot ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("Start Signal", callback_data="start")]]
-    await update.message.reply_text("👋 Welcome! Click below:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("👋 Welcome to Quotex Sniper", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def pair_selector(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
     keyboard = [[InlineKeyboardButton(pair, callback_data=f"pair_{pair}")] for pair in PAIRS]
-    await query.edit_message_text("📊 Choose pair:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text("📊 Choose a pair:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def send_signal(pair, user_id, context, is_retry=False):
-    await context.bot.send_message(chat_id=user_id, text=f"📍 PAIR: {pair}\n⏱️ TIME: 1m\n⏳ Waiting for candle...")
-    current_min = get_current_time().minute
-    while get_current_time().minute == current_min:
+    await context.bot.send_message(chat_id=user_id, text=f"📍 PAIR: {pair}
+⏱️ TIME: 1 Minute
+⏳ Waiting for candle...")
+    current_minute = get_current_time().minute
+    while get_current_time().minute == current_minute:
         await asyncio.sleep(0.5)
 
     if is_red_news():
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Red news — Trade blocked.")
+        await context.bot.send_message(chat_id=user_id, text="🔕 Red news active. Trade skipped.")
         return
 
     direction, confidence, entry_color, reasons = analyze(pair)
     trade_id = len(trade_history) + 1
     trade_history.append({"id": trade_id, "pair": pair, "dir": direction, "conf": confidence, "entry_color": entry_color, "result": "WAIT", "retry": is_retry})
 
-    await context.bot.send_message(chat_id=user_id, text=f"📊 PAIR: {pair}\n🕒 TIME: 1 MIN\n🧠 Direction: {direction}\n🎯 Confidence: {confidence}\n📌 Reason: {' + '.join(reasons)}\nTrade #{trade_id}")
+    total = len(trade_history)
+    wins = len([x for x in trade_history if x["result"] == "WIN"])
+    accuracy = round((wins / total) * 100, 2) if total else 0
+    await context.bot.send_message(chat_id=user_id, text=f"📊 PAIR: {pair}
+⏱️ TIME: 1m
+🎯 Direction: {direction}
+📌 Confidence: {confidence}
+📊 Accuracy: {accuracy}%
+💡 Logic: {' + '.join(reasons)}
+Trade #{trade_id}")
 
     await asyncio.sleep(60)
-    _, exit_color, _, _ = analyze(pair)
-    result = "WIN" if (direction == "UP" and exit_color == "green") or (direction == "DOWN" and exit_color == "red") else "LOSS"
-    trade_history[-1]["result"] = result
-    await context.bot.send_message(chat_id=user_id, text=f"🏁 RESULT: {result} for Trade #{trade_id}")
+    last_candle = get_recent_candles(pair.replace("/", ""), 1)
+    if last_candle:
+        candle = last_candle[0]
+        open_, close = candle["open"], candle["close"]
+        result = "WIN" if (direction == "UP" and close > open_) or (direction == "DOWN" and close < open_) else "LOSS"
+        trade_history[-1]["result"] = result
+        await context.bot.send_message(chat_id=user_id, text=f"🏁 RESULT: {result} for Trade #{trade_id}")
 
-    if result == "LOSS" and confidence == "HIGH" and not is_retry:
-        new_dir, _, _, _ = analyze(pair)
-        if new_dir == direction:
-            await context.bot.send_message(chat_id=user_id, text="🔁 Smart Retry Triggered...")
-            await send_signal(pair, user_id, context, is_retry=True)
+        if result == "LOSS" and confidence == "HIGH" and not is_retry:
+            redir, _, _, _ = analyze(pair)
+            if redir == direction:
+                await context.bot.send_message(chat_id=user_id, text="🔁 Smart Retry Triggered")
+                await send_signal(pair, user_id, context, is_retry=True)
+
+    if trade_id % 3 == 0:
+        await display_stats(user_id, context)
 
     keyboard = [[InlineKeyboardButton("🔁 Next Signal", callback_data=f"next_{pair}")]]
-    await context.bot.send_message(chat_id=user_id, text="Choose next:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await context.bot.send_message(chat_id=user_id, text="What’s next:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
@@ -147,21 +164,34 @@ async def handle_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pair = query.data.split("_")[1]
     await send_signal(pair, query.from_user.id, context)
 
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def display_stats(user_id, context):
     total = len(trade_history)
     wins = len([x for x in trade_history if x["result"] == "WIN"])
     losses = len([x for x in trade_history if x["result"] == "LOSS"])
     rate = round((wins / total) * 100, 2) if total else 0
-    await update.message.reply_text(f"📊 Total: {total}\n✅ Wins: {wins}\n❌ Losses: {losses}\n🎯 Accuracy: {rate}%")
+    last = trade_history[-1] if trade_history else {}
+    msg = f"📊 Sniper Bot Stats:
+✅ Wins: {wins}
+❌ Losses: {losses}
+🎯 Accuracy: {rate}%"
+    if last:
+        msg += f"
+🆔 Last: #{last['id']} {last['pair']} | {last['dir']} | {last['conf']} | {last['result']}"
+    await context.bot.send_message(chat_id=user_id, text=msg)
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await display_stats(update.message.chat_id, context)
 
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = "📋 Trade History:\n"
+    msg = "📋 Trade History:
+"
     for t in trade_history[-10:]:
         retry = " (Retry)" if t.get("retry") else ""
-        msg += f"#{t['id']} {t['pair']} | {t['dir']} | {t['conf']}{retry} | {t['result']}\n"
+        msg += f"#{t['id']} {t['pair']} | {t['dir']} | {t['conf']}{retry} | {t['result']}
+"
     await update.message.reply_text(msg or "No trades yet.")
 
-# === Main Run ===
+# === Main ===
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
@@ -171,5 +201,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(pair_selector, pattern="^start$"))
     app.add_handler(CallbackQueryHandler(handle_pair, pattern="^pair_"))
     app.add_handler(CallbackQueryHandler(handle_next, pattern="^next_"))
-    print("✅ Sniper Bot with 100 Candle Analysis + Fix is LIVE")
+    print("✅ Sniper Bot with Candle Win Detection + Live Stats is Running")
     app.run_polling()
