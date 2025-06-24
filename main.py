@@ -5,22 +5,19 @@ import requests
 import datetime
 import pytz
 import asyncio
-import os
-from dotenv import load_dotenv
 import openai
-
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from tradingview_ta import TA_Handler, Interval
-
-# === Load .env variables FIRST ===
-load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # === CONFIG ===
 TELEGRAM_TOKEN = "7704084377:AAG56RXCZvJpnTlTEMSKO9epJUl9B8-1on8"
 CHAT_ID = "6183147124"
 NEWS_API_KEY = "8b5c91784c144924a179b7b0899ba61f"
+OPENAI_API_KEY = "sk-proj-***"  # Use your regenerated secure key
+openai.api_key = OPENAI_API_KEY = "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"
+ 
+
 
 PAIRS = [
     "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD",
@@ -30,6 +27,7 @@ PAIRS = [
 
 user_selection = {}
 trade_history = []
+logic_stats = {}
 
 # === UTILITIES ===
 def get_time():
@@ -76,6 +74,7 @@ def analyze(pair):
     direction = 'UP' if ema9 > ema21 else 'DOWN'
     reasons, score = [], 0
 
+    # Core logic layers
     if ema9 > ema21: reasons.append("EMA Up"); score += 1
     if ema9 < ema21: reasons.append("EMA Down"); score += 1
     if direction == 'UP' and rsi < 30: reasons.append("RSI Oversold"); score += 1
@@ -85,12 +84,14 @@ def analyze(pair):
     if direction == 'UP' and lower_wick > body: reasons.append("Wick Rejection"); score += 1
     if direction == 'DOWN' and upper_wick > body: reasons.append("Wick Rejection"); score += 1
 
-    # Trap Wick Logic
+    # Smart money logic: trap wick
     if upper_wick > body * 2 and direction == 'UP': reasons.append("Trap Reversal"); direction = 'DOWN'
     if lower_wick > body * 2 and direction == 'DOWN': reasons.append("Trap Reversal"); direction = 'UP'
 
+    # Candle structure logic
     if body > upper_wick + lower_wick: reasons.append("Strong Body"); score += 1
 
+    # Confidence level
     conf = 'LOW'
     if score >= 6: conf = 'HIGH'
     elif score >= 4: conf = 'MEDIUM'
