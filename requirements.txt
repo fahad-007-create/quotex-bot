@@ -1,4 +1,5 @@
 python-telegram-bot==20.3
+openai
 tradingview_ta
 requests
 pytz
