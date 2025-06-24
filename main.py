@@ -1,8 +1,6 @@
-# Binary Signal Bot - Advanced Version for Quotex (Real Market)
-# Includes EMA trend filter, support/resistance, candle patterns, RSI/MACD, time filter, news filter, confidence levels, Telegram alerts
-
+# Real Quotex Signal Bot (v1)
 import requests, time, datetime
-from tradingview_ta import TA_Handler, Interval, Exchange
+from tradingview_ta import TA_Handler, Interval
 import pytz
 
 # === CONFIG ===
@@ -11,25 +9,23 @@ TELEGRAM_CHAT_ID = "6183147124"
 NEWS_API_KEY = "8b5c91784c144924a179b7b0899ba61f"
 
 PAIRS = [
-    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD",
-    "USDCAD", "EURJPY", "GBPJPY", "EURGBP", "EURCHF"
+    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD",
+    "NZDUSD", "USDCAD", "EURJPY", "GBPJPY", "EURGBP", "EURCHF"
 ]
 
-# ✅ FIXED INTERVALS (TV_TA does not support 1M or 5M)
 INTERVALS = {
     "1m": Interval.INTERVAL_1_HOUR,
     "5m": Interval.INTERVAL_1_HOUR
 }
 
-# === UTILITY FUNCTIONS ===
 def get_news_status():
-    url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&apiKey={NEWS_API_KEY}"
     try:
+        url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&apiKey={NEWS_API_KEY}"
         res = requests.get(url).json()
         if 'articles' in res and len(res['articles']) > 0:
             return True
     except:
-        pass
+        return False
     return False
 
 def get_pk_time():
@@ -37,17 +33,23 @@ def get_pk_time():
 
 def is_in_trading_session():
     now = get_pk_time()
-    hour = now.hour
-    minute = now.minute
-    total = hour * 60 + minute
-    return (720 <= total <= 990) or (1080 <= total <= 1320)
+    total_minutes = now.hour * 60 + now.minute
+    return (720 <= total_minutes <= 990) or (1080 <= total_minutes <= 1320)
 
 def send_signal(pair, tf, signal, confidence, reason):
     tag = "✅ Real Market Signal" if reason != "NEWS" else "⚠️ News Signal"
-    msg = f"\n📊 PAIR: {pair}\n⏱️ TIMEFRAME: {tf}\n🎯 CONFIDENCE: {confidence}\n📈 DIRECTION: {signal}\n🧠 STRATEGY: {tag}"
+    msg = f"""
+📊 PAIR: {pair}
+⏱️ TIMEFRAME: {tf}
+🎯 CONFIDENCE: {confidence}
+📈 DIRECTION: {signal.upper()}
+🧠 STRATEGY: {tag}
+    """.strip()
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {"chat_id": TELEGRAM_CHAT_ID, "text": msg}
-    requests.post(url, data=data)
+    response = requests.post(url, data=data)
+    print("📤 Sent signal:", msg)
+    return response
 
 def get_signal(pair, tf):
     try:
@@ -92,17 +94,17 @@ def get_signal(pair, tf):
             confidence = "LOW"
             direction = "WAIT"
 
+        print(f"✅ Checked {pair} {tf}: Direction={direction}, Confidence={confidence}")
         return direction, confidence
-
     except Exception as e:
-        print(f"Error analyzing {pair}: {e}")
+        print(f"❌ Error analyzing {pair} {tf}:", e)
         return "WAIT", "LOW"
 
 # === MAIN LOOP ===
 if __name__ == "__main__":
     while True:
         if not is_in_trading_session():
-            print("⏳ Waiting for trading session...")
+            print(f"⏳ Waiting for trading session... ({get_pk_time().strftime('%H:%M')})")
             time.sleep(60)
             continue
 
@@ -111,6 +113,6 @@ if __name__ == "__main__":
             for tf in ["1m", "5m"]:
                 direction, confidence = get_signal(pair, tf)
                 if direction != "WAIT":
-                    signal_type = "NEWS" if is_news else "MARKET"
-                    send_signal(pair, tf.upper(), direction, confidence, signal_type)
+                    source = "NEWS" if is_news else "MARKET"
+                    send_signal(pair, tf.upper(), direction, confidence, source)
         time.sleep(60)
