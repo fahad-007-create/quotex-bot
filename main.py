@@ -1,4 +1,3 @@
-
 # ✅ Quotex Sniper Bot - Fully Fixed with Candle Color Win Detection + Live Stats Display
 
 import logging
@@ -21,7 +20,6 @@ PAIRS = [
 user_selection = {}
 trade_history = []
 
-# === Utilities ===
 def get_current_time():
     return datetime.datetime.now(pytz.timezone("Asia/Karachi"))
 
@@ -52,7 +50,6 @@ def detect_snr_from_history(candles):
     lows = [c["low"] for c in candles]
     return max(highs[-20:]), min(lows[-20:])
 
-# === Analyzer ===
 def analyze(pair):
     try:
         handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
@@ -96,7 +93,6 @@ def analyze(pair):
     except:
         return "UP", "LOW", "red", ["Fallback"]
 
-# === Telegram Bot ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("Start Signal", callback_data="start")]]
     await update.message.reply_text("👋 Welcome to Quotex Sniper", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -125,6 +121,7 @@ async def send_signal(pair, user_id, context, is_retry=False):
     total = len(trade_history)
     wins = len([x for x in trade_history if x["result"] == "WIN"])
     accuracy = round((wins / total) * 100, 2) if total else 0
+
     await context.bot.send_message(chat_id=user_id, text=f"📊 PAIR: {pair}
 ⏱️ TIME: 1m
 🎯 Direction: {direction}
