@@ -1,12 +1,13 @@
-# 🔥 Enhanced Manual Signal Bot for Quotex - Fahad Edition
-# Strategy: EMA, RSI, MACD, Candle Wick/Body, Multi-Candle Patterns
+# 🚀 Quotex Manual Signal Bot with Fast Signal Detection + Win/Loss Tracking
+# Made for Fahad — Includes EMA, RSI, MACD, Wick Logic, Gap Detection, Momentum Logic
 
 import logging
 import requests
+import datetime
+import pytz
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from tradingview_ta import TA_Handler, Interval
-import datetime, pytz
 
 # === CONFIG ===
 TELEGRAM_TOKEN = "7704084377:AAG56RXCZvJpnTlTEMSKO9epJUl9B8-1on8"
@@ -23,6 +24,7 @@ INTERVALS = {
 }
 
 user_selection = {}
+trade_history = []
 
 # === STRATEGY ===
 def analyze_signal(pair, tf):
@@ -50,16 +52,14 @@ def analyze_signal(pair, tf):
         body = abs(close - open_)
         upper_wick = high - max(open_, close)
         lower_wick = min(open_, close) - low
-
-        candles = i.get("Candles", [])  # Needs external candle history if implemented
+        gap = abs(close - open_)
 
         print(f"📊 {pair} {tf} | RSI: {rsi}, EMA9: {ema9}, EMA21: {ema21}, MACD: {macd}, Signal: {macd_signal}, Summary: {summary}")
-        print(f"🕯️ Body: {body:.4f}, Wick Up: {upper_wick:.4f}, Wick Down: {lower_wick:.4f}")
 
         score = 0
         direction = "WAIT"
 
-        # === EMA trend filter ===
+        # EMA trend
         if ema9 > ema21:
             direction = "UP"
             score += 1
@@ -67,42 +67,30 @@ def analyze_signal(pair, tf):
             direction = "DOWN"
             score += 1
 
-        # === RSI ===
+        # RSI momentum
         if rsi < 30 and direction == "UP": score += 1
         if rsi > 70 and direction == "DOWN": score += 1
 
-        # === MACD ===
+        # MACD
         if macd > macd_signal and direction == "UP": score += 1
         if macd < macd_signal and direction == "DOWN": score += 1
 
-        # === Summary Confirmation ===
+        # TV Summary
         if summary == "BUY" and direction == "UP": score += 1
         if summary == "SELL" and direction == "DOWN": score += 1
 
-        # === Wick Confirmation (Rejection logic) ===
-        if direction == "UP" and lower_wick > body * 0.7: score += 1
-        if direction == "DOWN" and upper_wick > body * 0.7: score += 1
+        # Wick rejection logic
+        if direction == "UP" and lower_wick > body: score += 1
+        if direction == "DOWN" and upper_wick > body: score += 1
 
-        # === Engulfing candle logic (simplified) ===
-        if body > (upper_wick + lower_wick) and summary in ["STRONG_BUY", "STRONG_SELL"]:
-            score += 1
+        # Gap detection
+        if gap > body * 1.2: score += 1
 
-        # === Momentum: 3-candle reversal pattern logic (requires full candle history for accuracy) ===
-        if direction == "DOWN" and upper_wick > body and body < 0.5:
-            score += 1  # possible reversal
-        if direction == "UP" and lower_wick > body and body < 0.5:
-            score += 1
+        print(f"✅ Score: {score} | Dir: {direction}")
 
-        # === Gap logic approximation (gap between open/close) ===
-        gap = abs(close - open_)
-        if gap > body * 1.5:
-            score += 1
-
-        print(f"✅ Final Score: {score} | Direction: {direction}")
-
-        if score >= 5:
+        if score >= 4:
             confidence = "HIGH"
-        elif score >= 3:
+        elif score >= 2:
             confidence = "LOW"
         else:
             direction = "WAIT"
@@ -114,7 +102,7 @@ def analyze_signal(pair, tf):
         print(f"❌ Error: {e}")
         return "WAIT", "LOW"
 
-# === TELEGRAM FLOW ===
+# === TELEGRAM HANDLERS ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("Start Analysis", callback_data="start_analysis")]]
     await update.message.reply_text("👋 Welcome, click to begin:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -155,19 +143,52 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if direction == "WAIT":
         await context.bot.send_message(chat_id=uid, text=f"⚠️ No signal for {pair} ({tf_key}). Try again later.")
     else:
-        tag = "✅ Real Market Signal"
+        result_id = len(trade_history) + 1
+        trade_history.append({"id": result_id, "pair": pair, "tf": tf_key, "direction": direction, "confidence": confidence, "result": "PENDING"})
         await context.bot.send_message(
             chat_id=uid,
-            text=f"📊 PAIR: {pair}\n⏱️ TIMEFRAME: {tf_key}\n🎯 CONFIDENCE: {confidence}\n📈 DIRECTION: {direction}\n🧠 STRATEGY: {tag}"
+            text=f"📊 PAIR: {pair}\n⏱️ TIMEFRAME: {tf_key}\n🎯 CONFIDENCE: {confidence}\n📈 DIRECTION: {direction}\n🧠 STRATEGY: ✅ Real Market Signal\n📌 Trade ID: #{result_id}"
         )
 
-# === BOT INIT ===
+async def result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        parts = update.message.text.strip().split()
+        if len(parts) < 3:
+            await update.message.reply_text("❌ Format: /result [ID] [win/loss]")
+            return
+
+        tid = int(parts[1])
+        outcome = parts[2].upper()
+
+        for trade in trade_history:
+            if trade["id"] == tid:
+                trade["result"] = outcome
+                await update.message.reply_text(f"✅ Trade #{tid} marked as {outcome}.")
+                return
+
+        await update.message.reply_text("❌ Trade ID not found.")
+    except:
+        await update.message.reply_text("❌ Error processing your input.")
+
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not trade_history:
+        await update.message.reply_text("📉 No trades tracked yet.")
+        return
+
+    msg = "📋 Trade History:\n"
+    for t in trade_history[-10:]:
+        msg += f"#{t['id']} | {t['pair']} {t['tf']} | {t['direction']} | {t['confidence']} | Result: {t['result']}\n"
+    await update.message.reply_text(msg)
+
+# === RUN BOT ===
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("pair", pair_command))
+    app.add_handler(CommandHandler("result", result))
+    app.add_handler(CommandHandler("history", history))
     app.add_handler(CallbackQueryHandler(show_pairs, pattern="^start_analysis$"))
     app.add_handler(CallbackQueryHandler(show_timeframes, pattern="^pair_"))
     app.add_handler(CallbackQueryHandler(analyze, pattern="^tf_"))
