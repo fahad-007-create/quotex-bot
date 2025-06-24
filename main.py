@@ -14,10 +14,8 @@ from tradingview_ta import TA_Handler, Interval
 TELEGRAM_TOKEN = "7704084377:AAG56RXCZvJpnTlTEMSKO9epJUl9B8-1on8"
 CHAT_ID = "6183147124"
 NEWS_API_KEY = "8b5c91784c144924a179b7b0899ba61f"
-OPENAI_API_KEY = "sk-proj-***"  # Use your regenerated secure key
-openai.api_key = OPENAI_API_KEY = "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"
- 
-
+OPENAI_API_KEY = "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"  # Use your regenerated secure key
+openai.api_key = OPENAI_API_KEY
 
 PAIRS = [
     "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD",
