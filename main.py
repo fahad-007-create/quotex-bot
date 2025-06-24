@@ -1,5 +1,5 @@
-# 🚀 Quotex Ultimate Bot - Smart Money + News Filter Edition (Final Fixes)
-# ✅ Fixes: Direction output, next signal button, false red news alerts
+# 🚀 Quotex Sniper Bot - Final Pro Version (Fahad's Build)
+# 🧠 Includes: Smart Money Logic, Candle Patterns, Real-Time Candle Sync, Red News Filter, Clean Signal Format, Win/Loss Tracking
 
 import logging
 import requests
@@ -18,7 +18,7 @@ PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD", "
 user_selection = {}
 trade_history = []
 
-# === UTILS ===
+# === UTILITY ===
 def get_price(pair):
     try:
         handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
@@ -47,6 +47,26 @@ def is_red_news_active():
     return False
 
 # === STRATEGY ENGINE ===
+def detect_pattern(open_, close, high, low):
+    body = abs(close - open_)
+    upper_wick = high - max(open_, close)
+    lower_wick = min(open_, close) - low
+    is_bullish = close > open_
+    is_bearish = close < open_
+    patterns = []
+
+    if is_bullish and body > upper_wick and body > lower_wick:
+        patterns.append("Bullish Marubozu")
+    if is_bearish and body > upper_wick and body > lower_wick:
+        patterns.append("Bearish Marubozu")
+    if lower_wick > body * 2 and is_bullish:
+        patterns.append("Hammer")
+    if upper_wick > body * 2 and is_bearish:
+        patterns.append("Shooting Star")
+    if abs(close - open_) <= (high - low) * 0.1:
+        patterns.append("Doji")
+    return patterns
+
 def analyze_signal(pair):
     try:
         handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
@@ -72,14 +92,16 @@ def analyze_signal(pair):
         if macd > macd_sig and direction == "UP": score += 1; logic_used.append("MACD Bullish")
         if macd < macd_sig and direction == "DOWN": score += 1; logic_used.append("MACD Bearish")
 
-        if direction == "UP" and lw > body: score += 1; logic_used.append("OB Rejection")
-        if direction == "DOWN" and uw > body: score += 1; logic_used.append("FVG Reversal")
+        if direction == "UP" and lw > body: score += 1; logic_used.append("OB Wick Rejection")
+        if direction == "DOWN" and uw > body: score += 1; logic_used.append("FVG Wick Rejection")
 
-        if body > (uw + lw): score += 1; logic_used.append("Strong Candle")
+        if body > (uw + lw): score += 1; logic_used.append("Strong Body Candle")
 
-        hour = datetime.datetime.now(pytz.timezone("Asia/Karachi")).hour
-        if 12 <= hour <= 16 and direction == "UP": score += 1; logic_used.append("London Trend")
-        if 18 <= hour <= 22 and direction == "DOWN": score += 1; logic_used.append("NY Pullback")
+        patterns = detect_pattern(open_, close, high, low)
+        logic_used += patterns
+        if "Hammer" in patterns and direction == "UP": score += 1
+        if "Shooting Star" in patterns and direction == "DOWN": score += 1
+        if "Doji" in patterns: score -= 1
 
         confidence = "HIGH" if score >= 5 else "LOW"
         if score < 3: direction = "WAIT"
@@ -100,7 +122,7 @@ async def select_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("📊 Choose a trading pair:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def wait_for_next_candle(pair, user_id, context):
-    await context.bot.send_message(chat_id=user_id, text=f"📍 PAIR: {pair}\n⏱️ TIME: 1 Minute\n📊 TRADE: #{len(trade_history)+1}\n⏳ Wait for direction...")
+    await context.bot.send_message(chat_id=user_id, text=f"📍 PAIR: {pair}\n⏱️ TIME: 1 Minute\n📊 TRADE: #{len(trade_history)+1}\n⏳ WAIT FOR DIRECTION...")
 
     _, current_minute = get_current_second()
     while True:
@@ -110,7 +132,7 @@ async def wait_for_next_candle(pair, user_id, context):
         await asyncio.sleep(0.5)
 
     if is_red_news_active():
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Red News Detected – Signal Skipped for Safety.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Red News Detected – Skipping signal for safety.")
         return
 
     entry_price = get_price(pair)
@@ -119,10 +141,10 @@ async def wait_for_next_candle(pair, user_id, context):
     trade_history.append({"id": trade_id, "pair": pair, "direction": direction, "confidence": confidence, "entry": entry_price, "result": "PENDING"})
 
     if direction == "WAIT":
-        await context.bot.send_message(chat_id=user_id, text="⚠️ No valid signal. Try again after a candle.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ No valid signal. Try again after next candle.")
     else:
         logic_line = " + ".join(logic_used)
-        await context.bot.send_message(chat_id=user_id, text=f"📈 DIRECTION: {direction}\n🎯 CONFIDENCE: {confidence}\n📌 STRATEGY: {logic_line}\n💵 ENTRY PRICE: {entry_price}")
+        await context.bot.send_message(chat_id=user_id, text=f"📈 DIRECTION: {direction}\n🎯 CONFIDENCE: {confidence}\n📌 STRATEGY: {logic_line}\n💵 ENTRY: {entry_price}")
 
         await asyncio.sleep(60)
         exit_price = get_price(pair)
@@ -131,7 +153,7 @@ async def wait_for_next_candle(pair, user_id, context):
         await context.bot.send_message(chat_id=user_id, text=f"🏁 RESULT: {result} (Exit: {exit_price})")
 
     keyboard = [[InlineKeyboardButton("🔁 Next Signal", callback_data=f"next_{pair}")]]
-    await context.bot.send_message(chat_id=user_id, text="Ready for next trade? 👇", reply_markup=InlineKeyboardMarkup(keyboard))
+    await context.bot.send_message(chat_id=user_id, text="Ready for next signal? 👇", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
@@ -169,5 +191,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(select_pair, pattern="^start$"))
     app.add_handler(CallbackQueryHandler(handle_pair, pattern="^pair_"))
     app.add_handler(CallbackQueryHandler(handle_next, pattern="^next_"))
-    print("✅ Quotex Smart Money Bot Running…")
+    print("✅ Final Sniper Bot is Live…")
     app.run_polling()
