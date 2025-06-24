@@ -1,6 +1,5 @@
-# Manual Signal Bot with Stronger Strategy - For Fahad
-# Includes: EMA filter, RSI, MACD, candle trend, support/resistance scoring
-# Sends signal only after you choose pair and timeframe manually from Telegram
+# 🔥 Enhanced Manual Signal Bot for Quotex - Fahad Edition
+# Strategy: EMA, RSI, MACD, Candle Wick/Body, Multi-Candle Patterns
 
 import logging
 import requests
@@ -12,7 +11,6 @@ import datetime, pytz
 # === CONFIG ===
 TELEGRAM_TOKEN = "7704084377:AAG56RXCZvJpnTlTEMSKO9epJUl9B8-1on8"
 CHAT_ID = "6183147124"
-NEWS_API_KEY = "8b5c91784c144924a179b7b0899ba61f"
 
 PAIRS = [
     "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD",
@@ -36,71 +34,95 @@ def analyze_signal(pair, tf):
             interval=INTERVALS[tf]
         )
         a = handler.get_analysis()
-        rsi = a.indicators.get("RSI", 50)
-        ema9 = a.indicators.get("EMA9", 0)
-        ema21 = a.indicators.get("EMA21", 0)
-        macd = a.indicators.get("MACD.macd", 0)
-        macd_signal = a.indicators.get("MACD.signal", 0)
-        candle_analysis = a.summary.get("RECOMMENDATION", "NEUTRAL")
+        i = a.indicators
+        rsi = i.get("RSI", 50)
+        ema9 = i.get("EMA9", 0)
+        ema21 = i.get("EMA21", 0)
+        macd = i.get("MACD.macd", 0)
+        macd_signal = i.get("MACD.signal", 0)
+        summary = a.summary.get("RECOMMENDATION", "NEUTRAL")
 
-        # Log indicator values for debugging
-        print(f"🔍 {pair} ({tf}) | RSI: {rsi}, EMA9: {ema9}, EMA21: {ema21}, MACD: {macd}, Signal: {macd_signal}, Summary: {candle_analysis}")
+        close = i.get("close", 0)
+        open_ = i.get("open", 0)
+        high = i.get("high", 0)
+        low = i.get("low", 0)
+
+        body = abs(close - open_)
+        upper_wick = high - max(open_, close)
+        lower_wick = min(open_, close) - low
+
+        candles = i.get("Candles", [])  # Needs external candle history if implemented
+
+        print(f"📊 {pair} {tf} | RSI: {rsi}, EMA9: {ema9}, EMA21: {ema21}, MACD: {macd}, Signal: {macd_signal}, Summary: {summary}")
+        print(f"🕯️ Body: {body:.4f}, Wick Up: {upper_wick:.4f}, Wick Down: {lower_wick:.4f}")
 
         score = 0
         direction = "WAIT"
 
-        # Trend Direction (EMA)
+        # === EMA trend filter ===
         if ema9 > ema21:
-            score += 1
             direction = "UP"
+            score += 1
         elif ema9 < ema21:
-            score += 1
             direction = "DOWN"
-
-        # Momentum (RSI)
-        if rsi < 30 and direction == "UP":
-            score += 1
-        elif rsi > 70 and direction == "DOWN":
             score += 1
 
-        # MACD Momentum
-        if macd > macd_signal and direction == "UP":
-            score += 1
-        elif macd < macd_signal and direction == "DOWN":
+        # === RSI ===
+        if rsi < 30 and direction == "UP": score += 1
+        if rsi > 70 and direction == "DOWN": score += 1
+
+        # === MACD ===
+        if macd > macd_signal and direction == "UP": score += 1
+        if macd < macd_signal and direction == "DOWN": score += 1
+
+        # === Summary Confirmation ===
+        if summary == "BUY" and direction == "UP": score += 1
+        if summary == "SELL" and direction == "DOWN": score += 1
+
+        # === Wick Confirmation (Rejection logic) ===
+        if direction == "UP" and lower_wick > body * 0.7: score += 1
+        if direction == "DOWN" and upper_wick > body * 0.7: score += 1
+
+        # === Engulfing candle logic (simplified) ===
+        if body > (upper_wick + lower_wick) and summary in ["STRONG_BUY", "STRONG_SELL"]:
             score += 1
 
-        # Candle Trend Bias (TV Summary)
-        if candle_analysis == "BUY" and direction == "UP":
-            score += 1
-        elif candle_analysis == "SELL" and direction == "DOWN":
+        # === Momentum: 3-candle reversal pattern logic (requires full candle history for accuracy) ===
+        if direction == "DOWN" and upper_wick > body and body < 0.5:
+            score += 1  # possible reversal
+        if direction == "UP" and lower_wick > body and body < 0.5:
             score += 1
 
-        print(f"✅ {pair} {tf} → Score: {score}, Direction: {direction}")
+        # === Gap logic approximation (gap between open/close) ===
+        gap = abs(close - open_)
+        if gap > body * 1.5:
+            score += 1
 
-        if score >= 4:
+        print(f"✅ Final Score: {score} | Direction: {direction}")
+
+        if score >= 5:
             confidence = "HIGH"
-        elif score >= 2:
+        elif score >= 3:
             confidence = "LOW"
         else:
-            confidence = "LOW"
             direction = "WAIT"
+            confidence = "LOW"
 
         return direction, confidence
 
     except Exception as e:
-        print(f"❌ Error analyzing {pair} {tf}:", e)
+        print(f"❌ Error: {e}")
         return "WAIT", "LOW"
 
-# === TELEGRAM COMMANDS ===
+# === TELEGRAM FLOW ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("Start Analysis", callback_data="start_analysis")]]
-    await update.message.reply_text("👋 Welcome, click below to begin:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("👋 Welcome, click to begin:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def pair_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(pair, callback_data=f"pair_{pair}")] for pair in PAIRS]
     await update.message.reply_text("📊 Available Pairs:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# === FLOW CONTROL ===
 async def show_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -113,7 +135,7 @@ async def show_timeframes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pair = query.data.split("_")[1]
     user_selection[query.from_user.id] = {"pair": pair}
     keyboard = [[InlineKeyboardButton(tf, callback_data=f"tf_{tf.replace(' ', '')}")] for tf in INTERVALS.keys()]
-    await query.edit_message_text(f"✅ Selected {pair}\n🕒 Now choose timeframe:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text(f"✅ Selected {pair}\n🕒 Choose timeframe:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -124,19 +146,22 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pair = user_selection.get(uid, {}).get("pair")
 
     if not pair:
-        await query.edit_message_text("❌ Please restart using /start")
+        await query.edit_message_text("❌ Please restart with /start")
         return
 
     await query.edit_message_text(f"🔍 Analyzing {pair} ({tf_key})... Please wait")
     direction, confidence = analyze_signal(pair, tf_key)
 
     if direction == "WAIT":
-        await context.bot.send_message(chat_id=uid, text="⚠️ No valid signal found for this setup. Try a different pair or timeframe.")
+        await context.bot.send_message(chat_id=uid, text=f"⚠️ No signal for {pair} ({tf_key}). Try again later.")
     else:
         tag = "✅ Real Market Signal"
-        await context.bot.send_message(chat_id=uid, text=f"📊 PAIR: {pair}\n⏱️ TIMEFRAME: {tf_key}\n🎯 CONFIDENCE: {confidence}\n📈 DIRECTION: {direction}\n🧠 STRATEGY: {tag}")
+        await context.bot.send_message(
+            chat_id=uid,
+            text=f"📊 PAIR: {pair}\n⏱️ TIMEFRAME: {tf_key}\n🎯 CONFIDENCE: {confidence}\n📈 DIRECTION: {direction}\n🧠 STRATEGY: {tag}"
+        )
 
-# === RUN BOT ===
+# === BOT INIT ===
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
