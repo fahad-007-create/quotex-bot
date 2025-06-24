@@ -12,8 +12,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from tradingview_ta import TA_Handler, Interval
 
 # === CONFIG ===
-TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
-CHAT_ID = "YOUR_CHAT_ID"
+TELEGRAM_TOKEN = "7704084377:AAG56RXCZvJpnTlTEMSKO9epJUl9B8-1on8"
+CHAT_ID = "6183147124"
 PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD", "EURJPY", "GBPJPY", "EURGBP", "EURCHF"]
 user_selection = {}
 trade_history = []
