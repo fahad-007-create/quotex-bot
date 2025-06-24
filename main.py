@@ -1,5 +1,5 @@
-# 🚀 Quotex Sniper Bot - Final Pro Version (Fahad's Build)
-# 🧠 Includes: Smart Money Logic, Candle Patterns, Real-Time Candle Sync, Red News Filter, Clean Signal Format, Win/Loss Tracking
+# 🚀 Quotex Sniper Bot - Final Smart Logic Upgrade (Fahad v1.0)
+# ✅ Dynamic Scoring, Fast Signals, High Accuracy, Clean Format, Real-Time Candle Sync
 
 import logging
 import requests
@@ -23,7 +23,8 @@ def get_price(pair):
     try:
         handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
         return handler.get_analysis().indicators.get("close", 0)
-    except: return 0
+    except:
+        return 0
 
 def get_current_second():
     now = datetime.datetime.now(pytz.timezone("Asia/Karachi"))
@@ -46,7 +47,7 @@ def is_red_news_active():
         pass
     return False
 
-# === STRATEGY ENGINE ===
+# === STRATEGY ===
 def detect_pattern(open_, close, high, low):
     body = abs(close - open_)
     upper_wick = high - max(open_, close)
@@ -81,49 +82,74 @@ def analyze_signal(pair):
         uw = high - max(open_, close)
         lw = min(open_, close) - low
 
-        score, direction, logic_used = 0, "WAIT", []
+        score = 0
+        direction = "WAIT"
+        logic_used = []
 
-        if ema9 > ema21: direction = "UP"; score += 1; logic_used.append("EMA Uptrend")
-        elif ema9 < ema21: direction = "DOWN"; score += 1; logic_used.append("EMA Downtrend")
+        if ema9 > ema21:
+            direction = "UP"
+            score += 1
+            logic_used.append("EMA Uptrend")
+        elif ema9 < ema21:
+            direction = "DOWN"
+            score += 1
+            logic_used.append("EMA Downtrend")
 
-        if rsi < 30 and direction == "UP": score += 1; logic_used.append("RSI Oversold")
-        if rsi > 70 and direction == "DOWN": score += 1; logic_used.append("RSI Overbought")
+        if rsi < 30 and direction == "UP":
+            score += 1
+            logic_used.append("RSI Oversold")
+        elif rsi > 70 and direction == "DOWN":
+            score += 1
+            logic_used.append("RSI Overbought")
 
-        if macd > macd_sig and direction == "UP": score += 1; logic_used.append("MACD Bullish")
-        if macd < macd_sig and direction == "DOWN": score += 1; logic_used.append("MACD Bearish")
+        if macd > macd_sig and direction == "UP":
+            score += 1
+            logic_used.append("MACD Bullish")
+        elif macd < macd_sig and direction == "DOWN":
+            score += 1
+            logic_used.append("MACD Bearish")
 
-        if direction == "UP" and lw > body: score += 1; logic_used.append("OB Wick Rejection")
-        if direction == "DOWN" and uw > body: score += 1; logic_used.append("FVG Wick Rejection")
+        if direction == "UP" and lw > body:
+            score += 1
+            logic_used.append("OB Rejection Wick")
+        if direction == "DOWN" and uw > body:
+            score += 1
+            logic_used.append("FVG Upper Wick")
 
-        if body > (uw + lw): score += 1; logic_used.append("Strong Body Candle")
+        if body > (uw + lw):
+            score += 1
+            logic_used.append("Momentum Candle")
 
         patterns = detect_pattern(open_, close, high, low)
         logic_used += patterns
-        if "Hammer" in patterns and direction == "UP": score += 1
-        if "Shooting Star" in patterns and direction == "DOWN": score += 1
-        if "Doji" in patterns: score -= 1
 
-        confidence = "HIGH" if score >= 5 else "LOW"
-        if score < 3: direction = "WAIT"
+        if "Hammer" in patterns and direction == "UP":
+            score += 1
+        if "Shooting Star" in patterns and direction == "DOWN":
+            score += 1
+
+        confidence = "HIGH" if score >= 4 else "LOW"
+        if score < 3:
+            direction = "WAIT"
 
         return direction, confidence, logic_used
     except Exception as e:
         print("❌ Analysis Error:", e)
         return "WAIT", "LOW", []
 
-# === TELEGRAM ===
+# === TELEGRAM HANDLERS ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("Start Signal", callback_data="start")]]
-    await update.message.reply_text("👋 Welcome! Click below to begin.", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("👋 Welcome! Click below to begin:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def select_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query; await query.answer()
+    query = update.callback_query
+    await query.answer()
     keyboard = [[InlineKeyboardButton(pair, callback_data=f"pair_{pair}")] for pair in PAIRS]
-    await query.edit_message_text("📊 Choose a trading pair:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text("📊 Choose a pair:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def wait_for_next_candle(pair, user_id, context):
-    await context.bot.send_message(chat_id=user_id, text=f"📍 PAIR: {pair}\n⏱️ TIME: 1 Minute\n📊 TRADE: #{len(trade_history)+1}\n⏳ WAIT FOR DIRECTION...")
-
+    await context.bot.send_message(chat_id=user_id, text=f"📍 PAIR: {pair}\n⏱️ TIME: 1 Minute\n📊 TRADE: #{len(trade_history)+1}\n⏳ Wait for direction...")
     _, current_minute = get_current_second()
     while True:
         sec, minute = get_current_second()
@@ -132,7 +158,7 @@ async def wait_for_next_candle(pair, user_id, context):
         await asyncio.sleep(0.5)
 
     if is_red_news_active():
-        await context.bot.send_message(chat_id=user_id, text="⚠️ Red News Detected – Skipping signal for safety.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Red News Active – Signal Skipped.")
         return
 
     entry_price = get_price(pair)
@@ -141,10 +167,10 @@ async def wait_for_next_candle(pair, user_id, context):
     trade_history.append({"id": trade_id, "pair": pair, "direction": direction, "confidence": confidence, "entry": entry_price, "result": "PENDING"})
 
     if direction == "WAIT":
-        await context.bot.send_message(chat_id=user_id, text="⚠️ No valid signal. Try again after next candle.")
+        await context.bot.send_message(chat_id=user_id, text=f"⚠️ No valid signal. Try again.")
     else:
         logic_line = " + ".join(logic_used)
-        await context.bot.send_message(chat_id=user_id, text=f"📈 DIRECTION: {direction}\n🎯 CONFIDENCE: {confidence}\n📌 STRATEGY: {logic_line}\n💵 ENTRY: {entry_price}")
+        await context.bot.send_message(chat_id=user_id, text=f"📍 PAIR: {pair}\n⏱️ TIME: 1 Minute\n📊 TRADE: #{trade_id}\n\n📈 DIRECTION: {direction}\n🎯 CONFIDENCE: {confidence}\n📌 STRATEGY: {logic_line}\n💵 ENTRY PRICE: {entry_price}")
 
         await asyncio.sleep(60)
         exit_price = get_price(pair)
@@ -153,15 +179,17 @@ async def wait_for_next_candle(pair, user_id, context):
         await context.bot.send_message(chat_id=user_id, text=f"🏁 RESULT: {result} (Exit: {exit_price})")
 
     keyboard = [[InlineKeyboardButton("🔁 Next Signal", callback_data=f"next_{pair}")]]
-    await context.bot.send_message(chat_id=user_id, text="Ready for next signal? 👇", reply_markup=InlineKeyboardMarkup(keyboard))
+    await context.bot.send_message(chat_id=user_id, text="Tap below for next signal:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query; await query.answer()
+    query = update.callback_query
+    await query.answer()
     pair = query.data.split("_")[1]
     await wait_for_next_candle(pair, query.from_user.id, context)
 
 async def handle_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query; await query.answer()
+    query = update.callback_query
+    await query.answer()
     pair = query.data.split("_")[1]
     await wait_for_next_candle(pair, query.from_user.id, context)
 
@@ -191,5 +219,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(select_pair, pattern="^start$"))
     app.add_handler(CallbackQueryHandler(handle_pair, pattern="^pair_"))
     app.add_handler(CallbackQueryHandler(handle_next, pattern="^next_"))
-    print("✅ Final Sniper Bot is Live…")
+    print("✅ Quotex Pro Bot is Live…")
     app.run_polling()
