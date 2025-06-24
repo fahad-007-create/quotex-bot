@@ -1,3 +1,4 @@
+python-telegram-bot==20.3
 tradingview_ta
-pytz
 requests
+pytz
