@@ -6,6 +6,8 @@ import requests
 import datetime
 import pytz
 import asyncio
+import json
+import os
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from tradingview_ta import TA_Handler, Interval
@@ -16,7 +18,22 @@ CHAT_ID = "6183147124"
 NEWS_API_KEY = "8b5c91784c144924a179b7b0899ba61f"
 PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD", "EURJPY", "GBPJPY", "EURGBP", "EURCHF"]
 user_selection = {}
+
+# === TRADE HISTORY LOAD/SAVE ===
+HISTORY_FILE = "trade_history.json"
 trade_history = []
+
+def load_trade_history():
+    global trade_history
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r") as f:
+            trade_history = json.load(f)
+    else:
+        trade_history = []
+
+def save_trade_history():
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(trade_history, f, indent=2)
 
 # === UTILITY ===
 def get_price(pair):
@@ -128,6 +145,7 @@ async def wait_for_next_candle(pair, user_id, context):
     exit_price = get_price(pair)
     result = "WIN" if (direction == "UP" and exit_price > entry) or (direction == "DOWN" and exit_price < entry) else "LOSS"
     trade_history[-1]["result"] = result
+    save_trade_history()
     await context.bot.send_message(chat_id=user_id, text=f"🏁 RESULT: {result} (Exit: {exit_price})")
 
     keyboard = [[InlineKeyboardButton("🔁 Next Signal", callback_data=f"next_{pair}")]]
@@ -161,6 +179,7 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
+    load_trade_history()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
