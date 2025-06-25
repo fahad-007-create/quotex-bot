@@ -13,14 +13,22 @@ from tradingview_ta import TA_Handler, Interval
 # === CONFIG ===
 TELEGRAM_TOKEN = "7704084377:AAG56RXCZvJpnTlTEMSKO9epJUl9B8-1on8"
 CHAT_ID = "6183147124"
-PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD", "EURJPY", "GBPJPY", "EURGBP", "EURCHF"]
+PAIRS = [
+    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD",
+    "USDCAD", "EURJPY", "GBPJPY", "EURGBP", "EURCHF"
+]
 user_selection = {}
 trade_history_v5 = []
 
 # === UTILITY ===
 def get_analysis(pair):
     try:
-        handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
+        handler = TA_Handler(
+            symbol=pair,
+            screener="forex",
+            exchange="FX_IDC",
+            interval=Interval.INTERVAL_1_MINUTE
+        )
         return handler.get_analysis().indicators
     except:
         return None
@@ -29,22 +37,31 @@ def get_current_second():
     now = datetime.datetime.now(pytz.timezone("Asia/Karachi"))
     return now.second, now.minute
 
-# === STRATEGY ===
+# === STRATEGY CORE ===
 def analyze_expert_v5(pair):
     i = get_analysis(pair)
-    if not i: return "WAIT", "LOW", ["No Data"]
+    if not i:
+        return "WAIT", "LOW", ["No Data"]
 
-    ema50, ema200 = i.get("EMA50", 0), i.get("EMA200", 0)
-    macd, macd_sig, hist = i.get("MACD.macd", 0), i.get("MACD.signal", 0), i.get("MACD.histogram", 0)
-    close, open_, high, low = i.get("close", 0), i.get("open", 0), i.get("high", 0), i.get("low", 0)
+    ema50 = i.get("EMA50", 0)
+    ema200 = i.get("EMA200", 0)
+    macd = i.get("MACD.macd", 0)
+    macd_sig = i.get("MACD.signal", 0)
+    hist = i.get("MACD.histogram", 0)
+    close = i.get("close", 0)
+    open_ = i.get("open", 0)
+    high = i.get("high", 0)
+    low = i.get("low", 0)
+
     body = abs(close - open_)
-    wick_up, wick_down = high - max(open_, close), min(open_, close) - low
+    wick_up = high - max(open_, close)
+    wick_down = min(open_, close) - low
 
     direction = "WAIT"
     score = 0
     logic = []
 
-    # EMA Trend Filter
+    # EMA 50/200 Trend Filter
     if ema50 > ema200:
         direction = "UP"
         score += 1
@@ -56,7 +73,7 @@ def analyze_expert_v5(pair):
     else:
         logic.append("EMA Flat")
 
-    # Break & Retest (Simplified by Wick Trap)
+    # Break & Retest with Wick Trap
     if direction == "UP" and wick_down > body:
         score += 1
         logic.append("Wick Trap Bull")
@@ -72,17 +89,18 @@ def analyze_expert_v5(pair):
         score += 1
         logic.append("MACD Bear Spike")
 
-    # Final Confirmation
+    # Final Decision
     if score >= 3:
         return direction, "HIGH", logic
     else:
         return "WAIT", "LOW", logic
 
-# === TELEGRAM COMMAND /startv5 ===
+# === COMMAND HANDLER: /startv5 ===
 async def startv5(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(pair, callback_data=f"v5_{pair}")] for pair in PAIRS]
     await update.message.reply_text("🔍 Select a pair for Expert v5.0:", reply_markup=InlineKeyboardMarkup(keyboard))
 
+# === SIGNAL GENERATION ===
 async def handle_v5(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -99,23 +117,41 @@ async def handle_v5(update: Update, context: ContextTypes.DEFAULT_TYPE):
             break
         await asyncio.sleep(0.5)
 
-    entry = get_analysis(pair).get("close", 0)
+    indicators = get_analysis(pair)
+    if not indicators:
+        await context.bot.send_message(chat_id=user_id, text="⚠️ Failed to retrieve market data.")
+        return
+
+    entry = indicators.get("close", 0)
     direction, confidence, logic_used = analyze_expert_v5(pair)
 
     if direction == "WAIT":
-        await context.bot.send_message(chat_id=user_id, text=f"⚠️ No Ultra-Confirmed Signal. Try again later.")
+        await context.bot.send_message(chat_id=user_id, text="⚠️ No Ultra-Confirmed Signal. Try again later.")
         return
 
     logic_line = " + ".join(logic_used)
     trade_id = len(trade_history_v5) + 1
-    trade_history_v5.append({"id": trade_id, "pair": pair, "direction": direction, "confidence": confidence, "entry": entry, "result": "PENDING"})
+    trade_history_v5.append({
+        "id": trade_id,
+        "pair": pair,
+        "direction": direction,
+        "confidence": confidence,
+        "entry": entry,
+        "result": "PENDING"
+    })
 
-    await context.bot.send_message(chat_id=user_id, text=f"📍 {pair} | Expert v5.0
-📈 Direction: {direction}
-🎯 Confidence: {confidence}
-📌 Logic: {logic_line}
-💵 Entry: {entry}")
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=(
+            f"📍 {pair} | Expert v5.0\n"
+            f"📈 Direction: {direction}\n"
+            f"🎯 Confidence: {confidence}\n"
+            f"📌 Logic: {logic_line}\n"
+            f"💵 Entry: {entry}"
+        )
+    )
 
+    # Wait 1 minute and check result
     await asyncio.sleep(60)
     exit_price = get_analysis(pair).get("close", 0)
     result = "WIN" if (direction == "UP" and exit_price > entry) or (direction == "DOWN" and exit_price < entry) else "LOSS"
@@ -126,10 +162,10 @@ async def handle_v5(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=user_id, text="Tap below for next v5 signal:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 # === MAIN ===
-if __name__ == '__main__':
+if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("startv5", startv5))
     app.add_handler(CallbackQueryHandler(handle_v5, pattern="^v5_"))
-    print("✅ Expert v5.0 Bot Running...")
+    print("✅ Expert v5.0 Bot Running…")
     app.run_polling()
