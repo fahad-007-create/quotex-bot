@@ -1,5 +1,5 @@
-# 🚀 Expert v4.0 Binary Bot — Built Like a 25-Year Trader
-# ✅ Fast Signals, Multi-Layered Accuracy, Real Market Only
+# ✅ Expert v5.0 Bot - Ultra-Confirmation Strategy via /startv5
+# 📊 Uses EMA 50/200 + Break & Retest + MACD Spike + Wick Trap Logic
 
 import logging
 import requests
@@ -13,143 +13,123 @@ from tradingview_ta import TA_Handler, Interval
 # === CONFIG ===
 TELEGRAM_TOKEN = "7704084377:AAG56RXCZvJpnTlTEMSKO9epJUl9B8-1on8"
 CHAT_ID = "6183147124"
-PAIRS = [
-    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD",
-    "EURJPY", "GBPJPY", "EURGBP", "EURCHF", "CADJPY", "AUDJPY", "EURCAD",
-    "AUDCAD", "NZDJPY", "CHFJPY", "USDHKD", "EURNZD", "GBPAUD"
-]
-trade_history = []
+PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD", "EURJPY", "GBPJPY", "EURGBP", "EURCHF"]
+user_selection = {}
+trade_history_v5 = []
 
 # === UTILITY ===
-def get_price(pair):
+def get_analysis(pair):
     try:
-        h = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
-        return h.get_analysis().indicators.get("close", 0)
-    except: return 0
+        handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
+        return handler.get_analysis().indicators
+    except:
+        return None
 
 def get_current_second():
     now = datetime.datetime.now(pytz.timezone("Asia/Karachi"))
     return now.second, now.minute
 
-# === STRATEGY CORE ===
-def detect_patterns(open_, close, high, low):
+# === STRATEGY ===
+def analyze_expert_v5(pair):
+    i = get_analysis(pair)
+    if not i: return "WAIT", "LOW", ["No Data"]
+
+    ema50, ema200 = i.get("EMA50", 0), i.get("EMA200", 0)
+    macd, macd_sig, hist = i.get("MACD.macd", 0), i.get("MACD.signal", 0), i.get("MACD.histogram", 0)
+    close, open_, high, low = i.get("close", 0), i.get("open", 0), i.get("high", 0), i.get("low", 0)
     body = abs(close - open_)
-    upper_wick = high - max(open_, close)
-    lower_wick = min(open_, close) - low
-    is_bull = close > open_
-    is_bear = close < open_
-    patterns = []
-    if is_bull and body > upper_wick and body > lower_wick: patterns.append("Bullish Marubozu")
-    if is_bear and body > upper_wick and body > lower_wick: patterns.append("Bearish Marubozu")
-    if lower_wick > body * 2 and is_bull: patterns.append("Hammer")
-    if upper_wick > body * 2 and is_bear: patterns.append("Shooting Star")
-    if abs(close - open_) <= (high - low) * 0.1: patterns.append("Doji")
-    return patterns
+    wick_up, wick_down = high - max(open_, close), min(open_, close) - low
 
-def analyze_signal(pair):
-    try:
-        h = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
-        i = h.get_analysis().indicators
-        rsi, ema9, ema21 = i.get("RSI", 50), i.get("EMA9", 0), i.get("EMA21", 0)
-        macd, macd_sig = i.get("MACD.macd", 0), i.get("MACD.signal", 0)
-        close, open_, high, low = i.get("close", 0), i.get("open", 0), i.get("high", 0), i.get("low", 0)
-        body = abs(close - open_)
-        uw, lw = high - max(open_, close), min(open_, close) - low
+    direction = "WAIT"
+    score = 0
+    logic = []
 
-        score, logic, direction = 0, [], "WAIT"
-        if ema9 > ema21: direction, score = "UP", 1; logic.append("EMA Up")
-        elif ema9 < ema21: direction, score = "DOWN", 1; logic.append("EMA Down")
-        if direction == "UP" and rsi < 30: score += 1; logic.append("RSI Oversold")
-        if direction == "DOWN" and rsi > 70: score += 1; logic.append("RSI Overbought")
-        if direction == "UP" and macd > macd_sig: score += 1; logic.append("MACD Bull")
-        if direction == "DOWN" and macd < macd_sig: score += 1; logic.append("MACD Bear")
-        if direction == "UP" and lw > body: score += 1; logic.append("Rejection Wick")
-        if direction == "DOWN" and uw > body: score += 1; logic.append("Trap Wick")
-        if body > (uw + lw): score += 1; logic.append("Momentum Candle")
+    # EMA Trend Filter
+    if ema50 > ema200:
+        direction = "UP"
+        score += 1
+        logic.append("EMA Bull Trend")
+    elif ema50 < ema200:
+        direction = "DOWN"
+        score += 1
+        logic.append("EMA Bear Trend")
+    else:
+        logic.append("EMA Flat")
 
-        patterns = detect_patterns(open_, close, high, low)
-        logic += patterns
-        if "Hammer" in patterns and direction == "UP": score += 1
-        if "Shooting Star" in patterns and direction == "DOWN": score += 1
+    # Break & Retest (Simplified by Wick Trap)
+    if direction == "UP" and wick_down > body:
+        score += 1
+        logic.append("Wick Trap Bull")
+    elif direction == "DOWN" and wick_up > body:
+        score += 1
+        logic.append("Wick Trap Bear")
 
-        if score < 3:
-            direction = "UP" if close > open_ else "DOWN"
-            logic.append("Body-Based Signal")
+    # MACD Momentum Spike
+    if direction == "UP" and macd > macd_sig and hist > 0.05:
+        score += 1
+        logic.append("MACD Bull Spike")
+    elif direction == "DOWN" and macd < macd_sig and hist < -0.05:
+        score += 1
+        logic.append("MACD Bear Spike")
 
-        confidence = "HIGH" if score >= 4 else "MODERATE"
-        return direction, confidence, logic
-    except Exception as e:
-        print("❌ Analysis Error:", e)
-        return "UP", "MODERATE", ["Fallback"]
+    # Final Confirmation
+    if score >= 3:
+        return direction, "HIGH", logic
+    else:
+        return "WAIT", "LOW", logic
 
-# === TELEGRAM CORE ===
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton("Start Signal", callback_data="start")]]
-    await update.message.reply_text("👋 Welcome to Expert v4.0 Bot!", reply_markup=InlineKeyboardMarkup(keyboard))
+# === TELEGRAM COMMAND /startv5 ===
+async def startv5(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton(pair, callback_data=f"v5_{pair}")] for pair in PAIRS]
+    await update.message.reply_text("🔍 Select a pair for Expert v5.0:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def select_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query; await query.answer()
-    keyboard = [[InlineKeyboardButton(pair, callback_data=f"pair_{pair}")] for pair in PAIRS]
-    await query.edit_message_text("📊 Choose a pair:", reply_markup=InlineKeyboardMarkup(keyboard))
+async def handle_v5(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    pair = query.data.split("_")[1]
+    user_id = query.from_user.id
 
-async def wait_for_next_candle(pair, user_id, context):
-    await context.bot.send_message(chat_id=user_id, text=f"📍 PAIR: {pair}\n⏱️ TIME: 1m\n⌛ Waiting for candle...")
-    _, current_min = get_current_second()
+    await context.bot.send_message(chat_id=user_id, text=f"🧠 Analyzing {pair} deeply. Please wait 2–3 minutes...")
+
+    # Wait for next candle
+    _, start_min = get_current_second()
     while True:
         s, m = get_current_second()
-        if m != current_min and s >= 58: break
+        if m != start_min and s >= 58:
+            break
         await asyncio.sleep(0.5)
 
-    entry = get_price(pair)
-    direction, conf, logic = analyze_signal(pair)
-    trade_id = len(trade_history) + 1
-    trade_history.append({"id": trade_id, "pair": pair, "direction": direction, "confidence": conf, "entry": entry, "result": "PENDING"})
-    logic_txt = " + ".join(logic)
-    await context.bot.send_message(chat_id=user_id, text=f"📍 {pair} | ⏱️ 1m | 📈 {direction}\n🎯 Confidence: {conf}\n📌 Logic: {logic_txt}\n💵 Entry: {entry}")
+    entry = get_analysis(pair).get("close", 0)
+    direction, confidence, logic_used = analyze_expert_v5(pair)
+
+    if direction == "WAIT":
+        await context.bot.send_message(chat_id=user_id, text=f"⚠️ No Ultra-Confirmed Signal. Try again later.")
+        return
+
+    logic_line = " + ".join(logic_used)
+    trade_id = len(trade_history_v5) + 1
+    trade_history_v5.append({"id": trade_id, "pair": pair, "direction": direction, "confidence": confidence, "entry": entry, "result": "PENDING"})
+
+    await context.bot.send_message(chat_id=user_id, text=f"📍 {pair} | Expert v5.0
+📈 Direction: {direction}
+🎯 Confidence: {confidence}
+📌 Logic: {logic_line}
+💵 Entry: {entry}")
 
     await asyncio.sleep(60)
-    exit_price = get_price(pair)
+    exit_price = get_analysis(pair).get("close", 0)
     result = "WIN" if (direction == "UP" and exit_price > entry) or (direction == "DOWN" and exit_price < entry) else "LOSS"
-    trade_history[-1]["result"] = result
+    trade_history_v5[-1]["result"] = result
     await context.bot.send_message(chat_id=user_id, text=f"🏁 RESULT: {result} (Exit: {exit_price})")
 
-    keyboard = [[InlineKeyboardButton("🔁 Next Signal", callback_data=f"next_{pair}")]]
-    await context.bot.send_message(chat_id=user_id, text="Tap for next signal:", reply_markup=InlineKeyboardMarkup(keyboard))
+    keyboard = [[InlineKeyboardButton("🔁 Next v5 Signal", callback_data=f"v5_{pair}")]]
+    await context.bot.send_message(chat_id=user_id, text="Tap below for next v5 signal:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def handle_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    pair = update.callback_query.data.split("_")[1]
-    await wait_for_next_candle(pair, update.callback_query.from_user.id, context)
-
-async def handle_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    pair = update.callback_query.data.split("_")[1]
-    await wait_for_next_candle(pair, update.callback_query.from_user.id, context)
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    total = len(trade_history)
-    wins = len([t for t in trade_history if t['result'] == 'WIN'])
-    losses = len([t for t in trade_history if t['result'] == 'LOSS'])
-    rate = round((wins / total) * 100, 2) if total else 0
-    await update.message.reply_text(f"📊 Trades: {total}\n✅ Wins: {wins}\n❌ Losses: {losses}\n🎯 Accuracy: {rate}%")
-
-async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not trade_history:
-        await update.message.reply_text("📉 No trades yet.")
-        return
-    msg = "📋 Trade History:\n"
-    for t in trade_history[-10:]:
-        msg += f"#{t['id']} {t['pair']} | {t['direction']} | {t['confidence']} | {t['result']}\n"
-    await update.message.reply_text(msg)
-
+# === MAIN ===
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("history", history))
-    app.add_handler(CallbackQueryHandler(select_pair, pattern="^start$"))
-    app.add_handler(CallbackQueryHandler(handle_pair, pattern="^pair_"))
-    app.add_handler(CallbackQueryHandler(handle_next, pattern="^next_"))
-    print("✅ Expert v4.0 Bot Running...")
+    app.add_handler(CommandHandler("startv5", startv5))
+    app.add_handler(CallbackQueryHandler(handle_v5, pattern="^v5_"))
+    print("✅ Expert v5.0 Bot Running...")
     app.run_polling()
