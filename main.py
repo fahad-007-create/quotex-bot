@@ -1,143 +1,100 @@
-# ✅ Quotex Sniper Bot - Final Smart Logic Upgrade (Fahad v1.0)
-# ✅ Dynamic Scoring, Fast Signals, High Accuracy, Clean Format, Real-Time Candle Sync
-
+# main.py
+import json
+import time
 import logging
 import requests
-import datetime
-import pytz
-import asyncio
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-from tradingview_ta import TA_Handler, Interval
+from flask import Flask, request
+from config import TELEGRAM_TOKEN, CHAT_ID, PAIRS
 
-# === CONFIG ===
-TELEGRAM_TOKEN = "7704084377:AAG56RXCZvJpnTlTEMSKO9epJUl9B8-1on8"
-CHAT_ID = "6183147124"
-NEWS_API_KEY = "8b5c91784c144924a179b7b0899ba61f"
-PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD", "EURJPY", "GBPJPY", "EURGBP", "EURCHF"]
-user_selection = {}
-trade_history = []
+app = Flask(__name__)
 
-# === UTILITY ===
-def get_price(pair):
-    try:
-        handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
-        return handler.get_analysis().indicators.get("close", 0)
-    except:
+# Initialize stats
+stats = {
+    "wins": 0,
+    "losses": 0,
+    "total": 0
+}
+
+# Store last signal to handle "Next Signal" logic
+last_pair = None
+last_direction = None
+awaiting_result = False
+
+# Send Telegram message
+def send_telegram_message(text, reply_markup=None):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+    requests.post(url, data=payload)
+
+# Analyze candle and decide signal
+def analyze_candle(data):
+    open_price = float(data["open"])
+    close_price = float(data["close"])
+    high = float(data["high"])
+    low = float(data["low"])
+    
+    candle_body = abs(close_price - open_price)
+    wick_top = high - max(open_price, close_price)
+    wick_bottom = min(open_price, close_price) - low
+
+    # Simple bullish engulfing + rejection logic
+    if close_price > open_price and wick_bottom > wick_top:
+        return "BUY"
+    elif close_price < open_price and wick_top > wick_bottom:
+        return "SELL"
+    else:
         return None
 
-def get_current_second():
-    now = datetime.datetime.now(pytz.timezone("Asia/Karachi"))
-    return now.second, now.minute
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    global last_pair, last_direction, awaiting_result
+    data = request.json
+    print(f"Received data: {data}")
 
-def is_red_news_active():
-    url = f"https://newsapi.org/v2/top-headlines?category=business&language=en&apiKey={NEWS_API_KEY}"
-    try:
-        res = requests.get(url).json()
-        articles = res.get("articles", [])
-        now = datetime.datetime.utcnow()
-        for article in articles:
-            published = article.get("publishedAt")
-            if published:
-                pub_time = datetime.datetime.strptime(published, "%Y-%m-%dT%H:%M:%SZ")
-                diff = abs((now - pub_time).total_seconds() / 60)
-                if diff <= 5:
-                    return True
-    except:
-        pass
-    return False
+    pair = data.get("pair")
+    timeframe = data.get("timeframe")
+    
+    if pair not in PAIRS or timeframe != "1m":
+        return "Ignored", 200
 
-# === STRATEGY ===
-def detect_pattern(open_, close, high, low):
-    body = abs(close - open_)
-    upper_wick = high - max(open_, close)
-    lower_wick = min(open_, close) - low
-    is_bullish = close > open_
-    is_bearish = close < open_
-    patterns = []
+    signal = analyze_candle(data)
+    if signal:
+        last_pair = pair
+        last_direction = signal
+        awaiting_result = True
 
-    if is_bullish and body > upper_wick and body > lower_wick:
-        patterns.append("Bullish Marubozu")
-    if is_bearish and body > upper_wick and body > lower_wick:
-        patterns.append("Bearish Marubozu")
-    if lower_wick > body * 2 and is_bullish:
-        patterns.append("Hammer")
-    if upper_wick > body * 2 and is_bearish:
-        patterns.append("Shooting Star")
-    if abs(close - open_) <= (high - low) * 0.1:
-        patterns.append("Doji")
-    return patterns
+        msg = f"\ud83d\udd25 <b>Binary Signal</b>\n\ud83d\udccb Pair: <b>{pair}</b>\n\u23f0 Timeframe: <b>1 Minute</b>\n\ud83d\udfe2 Direction: <b>{signal}</b>\n\ud83d\udccd Reason: Rejection Wick + Candle Body\n\n<b>Click below for next signal \u2b07\ufe0f</b>"
+        send_telegram_message(msg, reply_markup={
+            "inline_keyboard": [[
+                {"text": "➡️ Next Signal", "callback_data": "next_signal"}
+            ]]
+        })
+    return "OK", 200
 
-def analyze_signal(pair):
-    try:
-        handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
-        a = handler.get_analysis()
-        i = a.indicators
+@app.route("/callback", methods=["POST"])
+def callback():
+    global last_pair, last_direction, awaiting_result
+    query = request.json
+    if query["data"] == "next_signal":
+        if last_pair:
+            # Wait for next candle close in real setup
+            # For now simulate next signal
+            time.sleep(2)  # Simulated delay
+            send_telegram_message(f"Next signal on <b>{last_pair}</b> coming shortly...")
+    return "OK", 200
 
-        rsi, ema9, ema21 = i.get("RSI", 50), i.get("EMA9", 0), i.get("EMA21", 0)
-        macd, macd_sig = i.get("MACD.macd", 0), i.get("MACD.signal", 0)
-        close, open_, high, low = i.get("close", 0), i.get("open", 0), i.get("high", 0), i.get("low", 0)
+@app.route("/stats", methods=["GET"])
+def stat():
+    acc = (stats["wins"] / stats["total"] * 100) if stats["total"] > 0 else 0
+    text = f"\ud83d\udcca Bot Stats:\n✅ Wins: {stats['wins']}\n❌ Losses: {stats['losses']}\n🔁 Total: {stats['total']}\n🎯 Accuracy: {acc:.2f}%"
+    send_telegram_message(text)
+    return "OK", 200
 
-        if not all([rsi, ema9, ema21, close, open_, high, low]):
-            return "WAIT", "LOW", ["Analysis Failed"]
-
-        body = abs(close - open_)
-        uw = high - max(open_, close)
-        lw = min(open_, close) - low
-
-        score = 0
-        direction = "WAIT"
-        logic_used = []
-
-        if ema9 > ema21:
-            direction = "UP"
-            score += 1
-            logic_used.append("EMA Uptrend")
-        elif ema9 < ema21:
-            direction = "DOWN"
-            score += 1
-            logic_used.append("EMA Downtrend")
-
-        if rsi < 30 and direction == "UP":
-            score += 1
-            logic_used.append("RSI Oversold")
-        elif rsi > 70 and direction == "DOWN":
-            score += 1
-            logic_used.append("RSI Overbought")
-
-        if macd > macd_sig and direction == "UP":
-            score += 1
-            logic_used.append("MACD Bullish")
-        elif macd < macd_sig and direction == "DOWN":
-            score += 1
-            logic_used.append("MACD Bearish")
-
-        if direction == "UP" and lw > body:
-            score += 1
-            logic_used.append("OB Rejection Wick")
-        if direction == "DOWN" and uw > body:
-            score += 1
-            logic_used.append("FVG Upper Wick")
-
-        if body > (uw + lw):
-            score += 1
-            logic_used.append("Momentum Candle")
-
-        patterns = detect_pattern(open_, close, high, low)
-        logic_used += patterns
-
-        if "Hammer" in patterns and direction == "UP":
-            score += 1
-        if "Shooting Star" in patterns and direction == "DOWN":
-            score += 1
-
-        confidence = "HIGH" if score >= 4 else "LOW"
-        if score < 3:
-            direction = "WAIT"
-
-        return direction, confidence, logic_used
-    except Exception as e:
-        print("❌ Analysis Error:", e)
-        return "WAIT", "LOW", ["Analysis Exception"]
-
-# === REST OF CODE STAYS UNCHANGED ===
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8000)
