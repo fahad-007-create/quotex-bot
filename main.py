@@ -41,32 +41,36 @@ def calc_accuracy():
     return round((win / total) * 100, 2) if total else 0
 
 def analyze(pair):
-    handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
-    i = handler.get_analysis().indicators
-    o, c, h, l = i['open'], i['close'], i['high'], i['low']
-    ema9, ema21 = i['EMA9'], i['EMA21']
-    rsi, macd, macdsig = i['RSI'], i['MACD.macd'], i['MACD.signal']
-    body = abs(c - o)
-    upper = h - max(o, c)
-    lower = min(o, c) - l
-    color = 'green' if c > o else 'red'
-    direction = 'UP' if ema9 > ema21 else 'DOWN'
-    score, reasons = 0, []
+    try:
+        handler = TA_Handler(symbol=pair, screener="forex", exchange="FX_IDC", interval=Interval.INTERVAL_1_MINUTE)
+        i = handler.get_analysis().indicators
+        o, c, h, l = i['open'], i['close'], i['high'], i['low']
+        ema9, ema21 = i['EMA9'], i['EMA21']
+        rsi, macd, macdsig = i['RSI'], i['MACD.macd'], i['MACD.signal']
+        body = abs(c - o)
+        upper = h - max(o, c)
+        lower = min(o, c) - l
+        color = 'green' if c > o else 'red'
+        direction = 'UP' if ema9 > ema21 else 'DOWN'
+        score, reasons = 0, []
 
-    if ema9 > ema21: score += 1; reasons.append("EMA Up")
-    if ema9 < ema21: score += 1; reasons.append("EMA Down")
-    if rsi < 30 and direction == 'UP': score += 1; reasons.append("RSI Oversold")
-    if rsi > 70 and direction == 'DOWN': score += 1; reasons.append("RSI Overbought")
-    if macd > macdsig and direction == 'UP': score += 1; reasons.append("MACD Bullish")
-    if macd < macdsig and direction == 'DOWN': score += 1; reasons.append("MACD Bearish")
-    if direction == 'UP' and lower > body: score += 1; reasons.append("Wick Rejection")
-    if direction == 'DOWN' and upper > body: score += 1; reasons.append("Wick Rejection")
-    if upper > body * 2 and direction == 'UP': direction = 'DOWN'; reasons.append("Trap Reversal")
-    if lower > body * 2 and direction == 'DOWN': direction = 'UP'; reasons.append("Trap Reversal")
-    if body > upper + lower: score += 1; reasons.append("Strong Body")
+        if ema9 > ema21: score += 1; reasons.append("EMA Up")
+        if ema9 < ema21: score += 1; reasons.append("EMA Down")
+        if rsi < 30 and direction == 'UP': score += 1; reasons.append("RSI Oversold")
+        if rsi > 70 and direction == 'DOWN': score += 1; reasons.append("RSI Overbought")
+        if macd > macdsig and direction == 'UP': score += 1; reasons.append("MACD Bullish")
+        if macd < macdsig and direction == 'DOWN': score += 1; reasons.append("MACD Bearish")
+        if direction == 'UP' and lower > body: score += 1; reasons.append("Wick Rejection")
+        if direction == 'DOWN' and upper > body: score += 1; reasons.append("Wick Rejection")
+        if upper > body * 2 and direction == 'UP': direction = 'DOWN'; reasons.append("Trap Reversal")
+        if lower > body * 2 and direction == 'DOWN': direction = 'UP'; reasons.append("Trap Reversal")
+        if body > upper + lower: score += 1; reasons.append("Strong Body")
 
-    conf = 'HIGH' if score >= 6 else 'MEDIUM' if score >= 4 else 'LOW'
-    return direction, conf, color, reasons
+        conf = 'HIGH' if score >= 6 else 'MEDIUM' if score >= 4 else 'LOW'
+        return direction, conf, color, reasons
+    except Exception as e:
+        print(f"⚠️ Signal error for {pair}: {e}")
+        return "UP", "LOW", "green", ["Fallback: TA API failed"]
 
 def get_explanation(pair, reasons, direction):
     try:
@@ -104,7 +108,12 @@ async def handle_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 PAIR: {pair}\n⏱️ TIME: 1 Minute\n🎯 Direction: {dir}\n📌 Confidence: {conf}\n📊 Accuracy: {acc}%\n🧠 {explanation}\n📎 Trade #{tid}")
 
     await asyncio.sleep(60)
-    cndl = get_candles(pair.replace("/", ""), 1)[0]
+    cndl = get_candles(pair.replace("/", ""), 1)
+    if not cndl:
+        await context.bot.send_message(chat_id=q.from_user.id, text="❌ Candle data missing.")
+        return
+
+    cndl = cndl[0]
     win = (dir == "UP" and cndl["close"] > cndl["open"]) or (dir == "DOWN" and cndl["close"] < cndl["open"])
     result = "WIN" if win else "LOSS"
     trade_history[-1]["result"] = result
