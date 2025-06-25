@@ -86,6 +86,16 @@ def analyze_expert_v5(pair):
     else:
         return "WAIT", "LOW", logic
 
+# === TELEGRAM COMMAND /start ===
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton("🚀 Expert v5.0 Mode", callback_data="open_v5")]]
+    await update.message.reply_text("👋 Welcome to Expert Binary Bot.\nChoose a strategy mode:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def open_v5_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await startv5(update, context)
+
 # === TELEGRAM COMMAND /startv5 ===
 async def startv5(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(pair, callback_data=f"v5_{pair}")] for pair in PAIRS]
@@ -137,6 +147,8 @@ async def handle_v5(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(open_v5_button, pattern="^open_v5$"))
     app.add_handler(CommandHandler("startv5", startv5))
     app.add_handler(CallbackQueryHandler(handle_v5, pattern="^v5_"))
     print("✅ Expert v5.0 Bot Running...")
