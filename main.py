@@ -67,7 +67,6 @@ def analyze_expert_v5(pair):
         logic.append("Wick Trap Bear")
     else:
         logic.append("No Clean Retest")
-        return "WAIT", "LOW", logic
 
     # ✅ MACD Momentum Spike
     if direction == "UP" and macd > macd_sig and hist > 0.05:
@@ -78,13 +77,14 @@ def analyze_expert_v5(pair):
         logic.append("MACD Bear Spike")
     else:
         logic.append("No MACD Momentum")
-        return "WAIT", "LOW", logic
 
-    # ✅ Final Ultra Confirmation
-    if score >= 3:
-        return direction, "HIGH", logic
+    # ✅ Force Signal (If 2/3 Confirmed)
+    if score >= 2:
+        return direction, ("HIGH" if score == 3 else "MODERATE"), logic
     else:
-        return "WAIT", "LOW", logic
+        direction = "UP" if close > open_ else "DOWN"
+        logic.append("Forced Direction via Candle Body")
+        return direction, "LOW", logic
 
 # === TELEGRAM COMMAND /start ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -126,10 +126,6 @@ async def handle_v5(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     entry = indicators.get("close", 0)
     direction, confidence, logic_used = analyze_expert_v5(pair)
-
-    if direction == "WAIT":
-        await context.bot.send_message(chat_id=user_id, text="⚠️ No Ultra-Confirmed Setup. Skipped.")
-        return
 
     logic_line = " + ".join(logic_used)
     trade_id = len(trade_history_v5) + 1
