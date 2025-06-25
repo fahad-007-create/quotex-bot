@@ -1,2 +1,4 @@
-Flask
+python-telegram-bot==20.3
+tradingview_ta
 requests
+pytz
