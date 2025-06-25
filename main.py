@@ -30,11 +30,15 @@ def is_red_news():
             if abs((datetime.datetime.utcnow() - t).total_seconds()) <= 300:
                 return True
     except: return False
+    return False
 
 def get_candles(pair, count=1):
     url = f"https://api.taapi.io/candles?secret=demo&exchange=fx_idc&symbol={pair}&interval=1m&limit={count}"
-    try: return requests.get(url).json().get("candles", [])
-    except: return []
+    try:
+        data = requests.get(url).json().get("candles", [])
+        return data if data else []
+    except:
+        return []
 
 def calc_accuracy():
     total = len(trade_history)
@@ -68,8 +72,9 @@ def analyze(pair):
         if body > upper + lower: score += 1; reasons.append("Strong Body")
         conf = 'HIGH' if score >= 6 else 'MEDIUM' if score >= 4 else 'LOW'
         return direction, conf, color, reasons
-    except:
-        return "UP", "LOW", "red", ["TA API failed"]
+    except Exception as e:
+        print("❌ TA API Error:", e)
+        return "SKIP", "LOW", "red", ["TA Failed"]
 
 def get_explanation(pair, reasons, direction):
     try:
@@ -93,13 +98,17 @@ async def handle_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     pair = q.data.split("_")[1]
     await context.bot.send_message(chat_id=q.from_user.id, text=f"📊 PAIR: {pair}\n⏱️ TIME: 1 Minute\n⏳ Direction: Analyzing... Please wait...")
-
     await asyncio.sleep(1.5)
+
     if is_red_news():
         await context.bot.send_message(chat_id=q.from_user.id, text="🚫 Red news detected. Skipping signal.")
         return
 
     dir, conf, color, reasons = analyze(pair)
+    if dir == "SKIP":
+        await context.bot.send_message(chat_id=q.from_user.id, text="⚠️ Market data unavailable. Try again in a few seconds.")
+        return
+
     tid = len(trade_history) + 1
     trade_history.append({"id": tid, "pair": pair, "dir": dir, "conf": conf, "entry_col": color, "result": "WAIT"})
     acc = calc_accuracy()
@@ -109,7 +118,12 @@ async def handle_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎯 DIRECTION: {dir}\n📌 CONFIDENCE: {conf}\n📊 ACCURACY: {acc}%\n📈 STRATEGY: {', '.join(reasons)}\n🧠 AI: {explanation}\n📎 Trade ID: #{tid}")
 
     await asyncio.sleep(60)
-    cndl = get_candles(pair.replace("/", ""), 1)[0]
+    candles = get_candles(pair.replace("/", ""), 1)
+    if not candles:
+        await context.bot.send_message(chat_id=q.from_user.id, text="⚠️ Cannot check result. Candle data missing.")
+        return
+
+    cndl = candles[0]
     win = (dir == "UP" and cndl["close"] > cndl["open"]) or (dir == "DOWN" and cndl["close"] < cndl["open"])
     result = "WIN" if win else "LOSS"
     trade_history[-1]["result"] = result
