@@ -1,4 +1,4 @@
-# ✅ Quotex Sniper Bot - AI Enhanced + 24/7 Working
+# ✅ Quotex Sniper Bot - AI Enhanced + 24/7 Working (Fast Version with Analyzing Prompt)
 
 import logging, requests, datetime, pytz, asyncio, openai
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -18,6 +18,7 @@ PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD",
 
 trade_history = []
 
+# === UTILITIES ===
 def get_time():
     return datetime.datetime.now(pytz.timezone("Asia/Karachi"))
 
@@ -65,19 +66,18 @@ def analyze(pair):
         if upper > body * 2 and direction == 'UP': direction = 'DOWN'; reasons.append("Trap Reversal")
         if lower > body * 2 and direction == 'DOWN': direction = 'UP'; reasons.append("Trap Reversal")
         if body > upper + lower: score += 1; reasons.append("Strong Body")
-
         conf = 'HIGH' if score >= 6 else 'MEDIUM' if score >= 4 else 'LOW'
         return direction, conf, color, reasons
-    except Exception as e:
-        print(f"⚠️ Signal error for {pair}: {e}")
-        return "UP", "LOW", "green", ["Fallback: TA API failed"]
+    except:
+        return "UP", "LOW", "red", ["TA API failed"]
 
 def get_explanation(pair, reasons, direction):
     try:
         prompt = f"Explain this forex signal:\nPair: {pair}\nDirection: {direction}\nReasons: {', '.join(reasons)}"
         res = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}])
         return res['choices'][0]['message']['content']
-    except: return "🧠 " + ', '.join(reasons)
+    except:
+        return "🧠 " + ', '.join(reasons)
 
 # === Bot Handlers ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,8 +92,9 @@ async def show_pairs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     pair = q.data.split("_")[1]
-    while get_time().second > 2: await asyncio.sleep(0.5)
+    await context.bot.send_message(chat_id=q.from_user.id, text=f"📊 PAIR: {pair}\n⏱️ TIME: 1 Minute\n⏳ Direction: Analyzing... Please wait...")
 
+    await asyncio.sleep(1.5)
     if is_red_news():
         await context.bot.send_message(chat_id=q.from_user.id, text="🚫 Red news detected. Skipping signal.")
         return
@@ -105,15 +106,10 @@ async def handle_pair(update: Update, context: ContextTypes.DEFAULT_TYPE):
     explanation = get_explanation(pair, reasons, dir)
 
     await context.bot.send_message(chat_id=q.from_user.id, text=
-        f"📊 PAIR: {pair}\n⏱️ TIME: 1 Minute\n🎯 Direction: {dir}\n📌 Confidence: {conf}\n📊 Accuracy: {acc}%\n🧠 {explanation}\n📎 Trade #{tid}")
+        f"🎯 DIRECTION: {dir}\n📌 CONFIDENCE: {conf}\n📊 ACCURACY: {acc}%\n📈 STRATEGY: {', '.join(reasons)}\n🧠 AI: {explanation}\n📎 Trade ID: #{tid}")
 
     await asyncio.sleep(60)
-    cndl = get_candles(pair.replace("/", ""), 1)
-    if not cndl:
-        await context.bot.send_message(chat_id=q.from_user.id, text="❌ Candle data missing.")
-        return
-
-    cndl = cndl[0]
+    cndl = get_candles(pair.replace("/", ""), 1)[0]
     win = (dir == "UP" and cndl["close"] > cndl["open"]) or (dir == "DOWN" and cndl["close"] < cndl["open"])
     result = "WIN" if win else "LOSS"
     trade_history[-1]["result"] = result
