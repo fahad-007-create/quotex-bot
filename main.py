@@ -99,7 +99,10 @@ async def open_v5_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === TELEGRAM COMMAND /startv5 ===
 async def startv5(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(pair, callback_data=f"v5_{pair}")] for pair in PAIRS]
-    await update.message.reply_text("🔍 Select a pair for Expert v5.0:", reply_markup=InlineKeyboardMarkup(keyboard))
+    if update.message:
+        await update.message.reply_text("🔍 Select a pair for Expert v5.0:", reply_markup=InlineKeyboardMarkup(keyboard))
+    elif update.callback_query:
+        await update.callback_query.edit_message_text("🔍 Select a pair for Expert v5.0:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle_v5(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
